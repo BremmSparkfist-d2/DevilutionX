@@ -792,7 +792,7 @@ void DoZealSecondHit(Player &player)
 	Monster *target = nullptr;
 
 	const int targetId = player._pZealSecondHitTargetId;
-	if (targetId >= 0 && targetId < static_cast<int>(Monsters.size())) {
+	if (targetId >= 0 && targetId < static_cast<int>(sizeof(Monsters) / sizeof(Monsters[0]))) {
 		Monster &candidate = Monsters[targetId];
 		const int dx = std::abs(player.position.tile.x - candidate.position.future.x);
 		const int dy = std::abs(player.position.tile.y - candidate.position.future.y);
