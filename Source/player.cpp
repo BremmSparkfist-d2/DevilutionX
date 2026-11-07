@@ -182,15 +182,6 @@ void StartAttack(Player &player, Direction d, bool includesFirstFrame)
 		return;
 	}
 
-	// Warrior Zeal: after a Zeal swing (or swing pair) resolves, a lockout
-	// runs before the next Zeal swing can start: two quick hits, then the
-	// full normal wait. Regular swings without a target (shift-attack into
-	// the air) are never blocked and never lock out.
-	if (player._pClass == HeroClass::Warrior && player._pZealLock > 0
-	    && (player.destAction == ACTION_ATTACKMON || player.destAction == ACTION_ATTACKPLR)) {
-		return;
-	}
-
 	int8_t skippedAnimationFrames = 0;
 	const auto flags = player._pIFlags;
 
@@ -205,26 +196,6 @@ void StartAttack(Player &player, Direction d, bool includesFirstFrame)
 		skippedAnimationFrames = includesFirstFrame ? 2 : 1;
 	} else if (HasAnyOf(flags, ItemSpecialEffect::QuickAttack)) {
 		skippedAnimationFrames = includesFirstFrame ? 1 : 0;
-	}
-
-	// Warrior Zeal: melee attacks that target a monster (or player) are
-	// Zeal swings: faster, chainable into a pair, and followed by the
-	// lockout. Swings at an empty tile (shift-attack into the air) stay
-	// completely vanilla: no speedup, no chain, no lockout.
-	// The skipped-frame count must stay at or below _pAFNum - 2, because
-	// setNewAnimation starts the animation at currentFrame = numSkippedFrames
-	// and one frame is consumed in the same tick; starting on the action
-	// frame would skip the hit window (currentFrame == _pAFNum - 1).
-	if (player._pClass == HeroClass::Warrior
-	    && (player.destAction == ACTION_ATTACKMON || player.destAction == ACTION_ATTACKPLR)) {
-		// 1 = first swing of a pair, 2 = chained second swing (set by the
-		// queue in DoAttack; preserved here so the second swing stays fast).
-		if (player._pZealSwing != 2)
-			player._pZealSwing = 1;
-		skippedAnimationFrames += player._pAFrames / 2;
-		skippedAnimationFrames = std::min<int8_t>(skippedAnimationFrames, std::max<int8_t>(0, static_cast<int8_t>(player._pAFNum - 2)));
-	} else if (player._pClass == HeroClass::Warrior) {
-		player._pZealSwing = 0; // regular swing without a target: no Zeal
 	}
 
 	auto animationFlags = AnimationDistributionFlags::ProcessAnimationPending;
@@ -809,13 +780,43 @@ bool PlrHitObj(const Player &player, Object &targetObject)
 	return false;
 }
 
-void StartZealLockout(Player &player)
+/**
+ * @brief Warrior Zeal: the free second hit, fired half a swing period after
+ * the first hit resolved. It targets the original monster if it is still
+ * alive and in reach, otherwise the monster in front of the player or any
+ * adjacent monster. It plays the swing sound and rolls a normal attack,
+ * but does not touch the regular swing animation or timing in any way.
+ */
+void DoZealSecondHit(Player &player)
 {
-	// One full vanilla swing period (frames * ticks per frame), counted from
-	// the moment the last hit of the swing/pair resolved.
-	// 1.5x the regular swing period: the zeal pair is faster than a normal
-	// swing cycle, so the wait after it is slightly longer to compensate.
-	player._pZealLock = (static_cast<int16_t>(player._pAFrames) * player.AnimInfo.ticksPerFrame * 3) / 2;
+	Monster *target = nullptr;
+
+	const int targetId = player._pZealSecondHitTargetId;
+	if (targetId >= 0 && targetId < static_cast<int>(Monsters.size())) {
+		Monster &candidate = Monsters[targetId];
+		const int dx = std::abs(player.position.tile.x - candidate.position.future.x);
+		const int dy = std::abs(player.position.tile.y - candidate.position.future.y);
+		if (!candidate.hasNoLife() && dx <= 1 && dy <= 1)
+			target = &candidate;
+	}
+	if (target == nullptr) {
+		target = FindMonsterAtPosition(player.position.tile + player._pdir);
+		if (target != nullptr && (target->hasNoLife() || CanTalkToMonst(*target)))
+			target = nullptr;
+	}
+	if (target == nullptr) {
+		for (int i = 0; i < 8 && target == nullptr; i++) {
+			Monster *monster = FindMonsterAtPosition(player.position.tile + static_cast<Direction>(i));
+			if (monster != nullptr && !monster->hasNoLife() && !CanTalkToMonst(*monster))
+				target = monster;
+		}
+	}
+
+	if (target == nullptr)
+		return;
+
+	PlaySfxLoc(SfxID::Swing, player.position.tile);
+	PlrHitMonst(player, *target);
 }
 
 bool DoAttack(Player &player)
@@ -885,44 +886,16 @@ bool DoAttack(Player &player)
 			return true;
 		}
 
-		// Warrior Zeal: queue the second free swing at the action frame, right
-		// after the first hit lands or whiffs. CheckNewPath executes the queued
-		// attack in the same tick and replaces the rest of this animation, so
-		// the pair flows like one motion and the normal inter-swing delay
-		// happens after the pair, not between the two swings. This mirrors how
-		// the vanilla hold-repeat starts its next swing mid-animation.
-		if (player._pClass == HeroClass::Warrior && player._pZealSwing == 1) {
-			Direction zealDir = player._pdir;
-			Monster *zealTarget = FindMonsterAtPosition(player.position.tile + zealDir);
-			if (zealTarget == nullptr || zealTarget->hasNoLife() || CanTalkToMonst(*zealTarget)) {
-				zealTarget = nullptr;
-				for (int i = 0; i < 8; i++) {
-					const Direction candidate = static_cast<Direction>(i);
-					Monster *monster = FindMonsterAtPosition(player.position.tile + candidate);
-					if (monster != nullptr && !monster->hasNoLife() && !CanTalkToMonst(*monster)) {
-						zealDir = candidate;
-						zealTarget = monster;
-						break;
-					}
-				}
-			}
-			if (zealTarget != nullptr) {
-				player.destAction = ACTION_ATTACKMON;
-				player.destParam1 = static_cast<int>(zealTarget->getId());
-				player._pZealSwing = 2;
-			} else {
-				// No second target: the pair ends here, start the lockout.
-				StartZealLockout(player);
-			}
+		// Warrior Zeal: schedule the free second hit for half a swing period
+		// after this hit resolved. ProcessPlayers counts the ticks down and
+		// fires DoZealSecondHit, which plays the swing sound and rolls a
+		// normal attack against the original target if it is still alive,
+		// or another adjacent monster. The regular swing animation and
+		// timing are completely untouched.
+		if (player._pClass == HeroClass::Warrior) {
+			player._pZealSecondHitTicks = (static_cast<int16_t>(player._pAFrames) * player.AnimInfo.ticksPerFrame) / 2;
+			player._pZealSecondHitTargetId = monster != nullptr ? static_cast<int>(monster->getId()) : -1;
 		}
-
-		// Warrior Zeal: the second swing ends the pair. Start the lockout so
-		// the next pair waits one full vanilla swing period (the same time
-		// that passes between two normal swings) instead of chaining
-		// non-stop. The lockout counts down while the second swing's
-		// recovery animation plays and while standing afterwards.
-		if (player._pClass == HeroClass::Warrior && player._pZealSwing == 2)
-			StartZealLockout(player);
 	}
 
 	if (player.AnimInfo.isLastFrame()) {
@@ -2656,7 +2629,7 @@ void StartStand(Player &player, Direction dir)
 
 	NewPlrAnim(player, player_graphic::Stand, dir);
 	player._pmode = PM_STAND;
-	player._pZealSwing = 0;
+	player._pZealSecondHitTicks = 0; // Warrior Zeal: cancel any pending second hit
 	FixPlayerLocation(player, dir);
 	FixPlrWalkTags(player);
 	player.occupyTile(player.position.tile, false);
@@ -3101,9 +3074,15 @@ void ProcessPlayers()
 				}
 			}
 
-			// Warrior Zeal: tick the lockout down once per game tick.
-			if (player._pZealLock > 0)
-				player._pZealLock--;
+			// Warrior Zeal: tick the free second hit countdown down once per
+			// game tick and fire it when it reaches zero.
+			if (player._pZealSecondHitTicks > 0) {
+				if (player.hasNoLife()) {
+					player._pZealSecondHitTicks = 0;
+				} else if (--player._pZealSecondHitTicks == 0) {
+					DoZealSecondHit(player);
+				}
+			}
 
 			bool tplayer = false;
 			do {
