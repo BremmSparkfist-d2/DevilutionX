@@ -4000,6 +4000,13 @@ void M_StartHit(Monster &monster, const Player &player, int dam)
 	M_StartHit(monster, dam);
 }
 
+void ForceMonsterGotHit(Monster &monster)
+{
+	// Warrior Zeal: force the got-hit animation, bypassing the vanilla
+	// IsHardHit flinch threshold (used by the Warrior's free second hit).
+	StartMonsterGotHit(monster);
+}
+
 void MonsterDeath(Monster &monster, Direction md, bool sendmsg)
 {
 	if (!monster.isPlayerMinion())
@@ -5050,3 +5057,4 @@ void Monster::occupyTile(Point tile, bool isMoving) const
 }
 
 } // namespace devilution
+
