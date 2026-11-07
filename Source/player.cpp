@@ -816,7 +816,11 @@ void DoZealSecondHit(Player &player)
 		return;
 
 	PlaySfxLoc(SfxID::Swing, player.position.tile);
-	PlrHitMonst(player, *target);
+	const bool didhit = PlrHitMonst(player, *target);
+	// The second Zeal hit always plays the monster's hit animation, even
+	// when its damage is below the vanilla "hard hit" flinch threshold.
+	if (didhit && !target->hasNoLife() && target->mode != MonsterMode::Petrified)
+		ForceMonsterGotHit(*target);
 }
 
 bool DoAttack(Player &player)

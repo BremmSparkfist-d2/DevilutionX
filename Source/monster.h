@@ -537,6 +537,7 @@ void M_ClearSquares(const Monster &monster);
 void M_GetKnockback(Monster &monster, WorldTilePosition attackerStartPos);
 void M_StartHit(Monster &monster, int dam);
 void M_StartHit(Monster &monster, const Player &player, int dam);
+void ForceMonsterGotHit(Monster &monster); // Warrior Zeal: force the got-hit animation, bypassing the hard-hit threshold
 void StartMonsterDeath(Monster &monster, const Player &player, bool sendmsg);
 void MonsterDeath(Monster &monster, Direction md, bool sendmsg);
 void KillGolem(Monster &golem);
