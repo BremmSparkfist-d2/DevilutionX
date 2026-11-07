@@ -203,6 +203,11 @@ void StartAttack(Player &player, Direction d, bool includesFirstFrame)
 		animationFlags = static_cast<AnimationDistributionFlags>(animationFlags | AnimationDistributionFlags::RepeatedAction);
 	NewPlrAnim(player, player_graphic::Attack, d, animationFlags, skippedAnimationFrames, player._pAFNum);
 	player._pmode = PM_ATTACK;
+	// Warrior Zeal: each new player-initiated swing starts with a clean
+	// Zeal state; the visual replay is not a new player-initiated swing.
+	player._pZealSecondHitPending = false;
+	player._pZealReplayAnim = false;
+	player._pZealSecondHitTargetId = -1;
 	FixPlayerLocation(player, d);
 	SetPlayerOld(player);
 }
@@ -781,12 +786,17 @@ bool PlrHitObj(const Player &player, Object &targetObject)
 }
 
 /**
- * @brief Warrior Zeal: the free second hit, fired half a swing period after
- * the first hit resolved. It targets the original monster if it is still
- * alive and in reach, otherwise the monster in front of the player or any
- * adjacent monster. It plays the swing sound and rolls a normal attack,
- * but does not touch the regular swing animation or timing in any way.
+ * @brief Warrior Zeal: the free second hit, fired when the swing animation
+ * reaches frame ZealSecondHitFrame after the regular hit connected. It
+ * targets the original monster if it is still alive and in reach, otherwise
+ * the monster in front of the player or any adjacent monster. It plays the
+ * swing sound and rolls a normal attack. The swing animation then restarts
+ * from frame 0 as a purely visual replay.
  */
+// Warrior Zeal: the swing animation frame (1-based) at which the second hit
+// resolves and the swing animation restarts for its visual replay.
+constexpr int ZealSecondHitFrame = 10;
+
 void DoZealSecondHit(Player &player)
 {
 	Monster *target = nullptr;
@@ -825,13 +835,15 @@ void DoZealSecondHit(Player &player)
 
 bool DoAttack(Player &player)
 {
-	if (player.AnimInfo.currentFrame == player._pAFNum - 2) {
+	// Warrior Zeal replay: the restarted swing is purely visual, so it does
+	// not replay the swing sound or resolve another hit on its action frame.
+	if (!player._pZealReplayAnim && player.AnimInfo.currentFrame == player._pAFNum - 2) {
 		PlaySfxLoc(SfxID::Swing, player.position.tile);
 	}
 
 	bool didhit = false;
 
-	if (player.AnimInfo.currentFrame == player._pAFNum - 1) {
+	if (!player._pZealReplayAnim && player.AnimInfo.currentFrame == player._pAFNum - 1) {
 		Point position = player.position.tile + player._pdir;
 		Monster *monster = FindMonsterAtPosition(position);
 
@@ -890,16 +902,28 @@ bool DoAttack(Player &player)
 			return true;
 		}
 
-		// Warrior Zeal: schedule the free second hit for half a swing period
-		// after this hit resolved. ProcessPlayers counts the ticks down and
-		// fires DoZealSecondHit, which plays the swing sound and rolls a
-		// normal attack against the original target if it is still alive,
-		// or another adjacent monster. The regular swing animation and
-		// timing are completely untouched.
-		if (player._pClass == HeroClass::Warrior) {
-			player._pZealSecondHitTicks = (static_cast<int16_t>(player._pAFrames) * player.AnimInfo.ticksPerFrame) / 2;
+		// Warrior Zeal: when the regular hit connects, arm the second hit.
+		// It resolves when the swing animation reaches frame
+		// ZealSecondHitFrame (see below); the swing animation then restarts
+		// from frame 0 as a purely visual replay that deals no damage.
+		if (player._pClass == HeroClass::Warrior && didhit) {
+			player._pZealSecondHitPending = true;
 			player._pZealSecondHitTargetId = monster != nullptr ? static_cast<int>(monster->getId()) : -1;
 		}
+	}
+
+	// Warrior Zeal: once the swing animation has reached frame 10 after the
+	// regular hit connected, the second hit resolves instantly (full vanilla
+	// hit mechanics via DoZealSecondHit) and the swing animation resets to
+	// frame 0 and renders fully as a visual replay. This happens at most once
+	// per player-initiated swing; the replay itself never re-triggers it.
+	if (player._pClass == HeroClass::Warrior && player._pZealSecondHitPending
+	    && player.AnimInfo.currentFrame >= ZealSecondHitFrame - 1
+	    && player.AnimInfo.currentFrame > player._pAFNum - 1) {
+		player._pZealSecondHitPending = false;
+		DoZealSecondHit(player);
+		player._pZealReplayAnim = true;
+		NewPlrAnim(player, player_graphic::Attack, player._pdir, AnimationDistributionFlags::ProcessAnimationPending);
 	}
 
 	if (player.AnimInfo.isLastFrame()) {
@@ -2633,7 +2657,8 @@ void StartStand(Player &player, Direction dir)
 
 	NewPlrAnim(player, player_graphic::Stand, dir);
 	player._pmode = PM_STAND;
-	player._pZealSecondHitTicks = 0; // Warrior Zeal: cancel any pending second hit
+	player._pZealSecondHitPending = false; // Warrior Zeal: cancel any pending second hit
+	player._pZealReplayAnim = false;
 	FixPlayerLocation(player, dir);
 	FixPlrWalkTags(player);
 	player.occupyTile(player.position.tile, false);
@@ -3078,15 +3103,8 @@ void ProcessPlayers()
 				}
 			}
 
-			// Warrior Zeal: tick the free second hit countdown down once per
-			// game tick and fire it when it reaches zero.
-			if (player._pZealSecondHitTicks > 0) {
-				if (player.hasNoLife()) {
-					player._pZealSecondHitTicks = 0;
-				} else if (--player._pZealSecondHitTicks == 0) {
-					DoZealSecondHit(player);
-				}
-			}
+			// Warrior Zeal: nothing to count down here anymore; the second
+			// hit is frame-based and resolves from DoAttack directly.
 
 			bool tplayer = false;
 			do {

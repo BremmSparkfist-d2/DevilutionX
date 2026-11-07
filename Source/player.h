@@ -290,8 +290,9 @@ struct Player {
 	int8_t _pNFrames;
 	int8_t _pWFrames;
 	int8_t _pAFrames;
-	int16_t _pZealSecondHitTicks = 0; // Warrior Zeal: ticks until the free second hit fires; 0 = none
+	bool _pZealSecondHitPending = false; // Warrior Zeal: regular hit connected, second hit armed
 	int _pZealSecondHitTargetId = -1; // Warrior Zeal: monster id for the pending second hit
+	bool _pZealReplayAnim = false; // Warrior Zeal: current swing anim is a visual replay (no hit, no sound)
 	int8_t _pAFNum;
 	int8_t _pSFrames;
 	int8_t _pSFNum;
