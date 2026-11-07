@@ -787,17 +787,13 @@ bool PlrHitObj(const Player &player, Object &targetObject)
 
 /**
  * @brief Warrior Zeal: the free second hit, fired when the swing animation
- * reaches frame ZealSecondHitFrame after the swing's action frame, whether
- * the regular hit connected or missed. It targets the original monster if
- * it is still alive and in reach, otherwise the monster in front of the
- * player or any adjacent monster. It plays the swing sound and rolls a
+ * passes half of the current weapon's swing length after the swing's action
+ * frame, whether the regular hit connected or missed. It targets the original
+ * monster if it is still alive and in reach, otherwise the monster in front of
+ * the player or any adjacent monster. It plays the swing sound and rolls a
  * normal attack. The swing animation then restarts from frame 0 as a purely
  * visual replay.
  */
-// Warrior Zeal: the swing animation frame (1-based) at which the second hit
-// resolves and the swing animation restarts for its visual replay.
-constexpr int ZealSecondHitFrame = 15;
-
 void DoZealSecondHit(Player &player)
 {
 	Monster *target = nullptr;
@@ -904,22 +900,24 @@ bool DoAttack(Player &player)
 		}
 
 		// Warrior Zeal: every swing arms the second hit, whether the regular
-		// hit connected or missed. It resolves when the swing animation
-		// reaches frame ZealSecondHitFrame (see below); the swing animation
-		// then restarts from frame 0 as a purely visual replay.
+		// hit connected or missed. It resolves once the swing animation has
+		// passed half of the current weapon's swing length (see below); the
+		// swing animation then restarts from frame 0 as a purely visual
+		// replay.
 		if (player._pClass == HeroClass::Warrior) {
 			player._pZealSecondHitPending = true;
 			player._pZealSecondHitTargetId = monster != nullptr ? static_cast<int>(monster->getId()) : -1;
 		}
 	}
 
-	// Warrior Zeal: once the swing animation has reached frame 15 after its
-	// action frame, the second hit resolves instantly (full vanilla
-	// hit mechanics via DoZealSecondHit) and the swing animation resets to
-	// frame 0 and renders fully as a visual replay. This happens at most once
-	// per player-initiated swing; the replay itself never re-triggers it.
+	// Warrior Zeal: once the swing animation has passed half of the current
+	// weapon's swing length (and at least one frame after its action frame),
+	// the second hit resolves instantly (full vanilla hit mechanics via
+	// DoZealSecondHit) and the swing animation resets to frame 0 and renders
+	// fully as a visual replay. This happens at most once per
+	// player-initiated swing; the replay itself never re-triggers it.
 	if (player._pClass == HeroClass::Warrior && player._pZealSecondHitPending
-	    && player.AnimInfo.currentFrame >= ZealSecondHitFrame - 1
+	    && player.AnimInfo.currentFrame >= player._pAFrames / 2
 	    && player.AnimInfo.currentFrame > player._pAFNum - 1) {
 		player._pZealSecondHitPending = false;
 		DoZealSecondHit(player);
