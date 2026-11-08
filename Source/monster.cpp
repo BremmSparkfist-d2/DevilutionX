@@ -818,6 +818,12 @@ void WalkInDirection(Monster &monster, Direction endDir)
 	monster.var2 = dir.y;
 	monster.var3 = static_cast<int8_t>(endDir);
 	NewMonsterAnim(monster, MonsterGraphic::Walk, endDir, AnimationDistributionFlags::ProcessAnimationPending, -1);
+
+	// Rogue Rebalance: the golem walks noticeably faster than the base
+	// monster walk animation. Halving the ticks per frame makes the walk
+	// animation (and with it the tile-to-tile movement) finish faster.
+	if (monster.type().type == MT_GOLEM && monster.animInfo.ticksPerFrame > 1)
+		monster.animInfo.ticksPerFrame = static_cast<int8_t>(monster.animInfo.ticksPerFrame / 2);
 }
 
 void StartAttack(Monster &monster)

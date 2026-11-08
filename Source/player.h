@@ -984,9 +984,9 @@ void StartPlayerKill(Player &player, DeathReason deathReason);
 
 /**
  * @brief Rogue Rebalance: duration in game ticks of the innate Golem cooldown
- * that starts when the Rogue's golem dies (15 seconds at 20 game ticks per second).
+ * that starts when the Rogue's golem dies (5 seconds at 20 game ticks per second).
  */
-constexpr int RogueGolemCooldownTicks = 15 * 20;
+constexpr int RogueGolemCooldownTicks = 5 * 20;
 
 /**
  * @brief Rogue Rebalance: starts the innate Golem cooldown for a Rogue
