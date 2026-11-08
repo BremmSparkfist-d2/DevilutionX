@@ -817,19 +817,36 @@ void WalkInDirection(Monster &monster, Direction endDir)
 	monster.var1 = dir.x;
 	monster.var2 = dir.y;
 	monster.var3 = static_cast<int8_t>(endDir);
-	NewMonsterAnim(monster, MonsterGraphic::Walk, endDir, AnimationDistributionFlags::ProcessAnimationPending, -1);
 
-	// Rogue Rebalance: the golem walks exactly as fast as its owner. The
-	// player's walk animation advances one frame per game tick and covers
-	// one tile in _pWFrames ticks, so scale the golem's walk ticks per
-	// frame so its walk animation spans the same number of ticks.
+	// Rogue Rebalance: the golem walks exactly as fast as its owner.
+	// The player's walk animation advances one frame per game tick and
+	// covers one tile in about _pWFrames + 1 ticks. If the golem's walk
+	// animation would take longer than that, compress it to the same
+	// duration: advance one frame per tick and start the walk animation
+	// on a later frame so the tile-to-tile move finishes just as fast as
+	// the owner's. The skipped frames are still shown (compressed) by the
+	// animation distribution logic.
+	bool golemWalkStarted = false;
 	if (monster.type().type == MT_GOLEM && monster.goalVar3 >= 0
 	    && static_cast<size_t>(monster.goalVar3) < Players.size()) {
 		const Player &owner = Players[monster.goalVar3];
-		if (owner._pWFrames > 0 && monster.animInfo.numberOfFrames > 0) {
-			const int ticksPerWalk = std::max(1, static_cast<int>(owner._pWFrames) / monster.animInfo.numberOfFrames);
-			monster.animInfo.ticksPerFrame = static_cast<int8_t>(std::clamp(ticksPerWalk, 1, 127));
+		const AnimStruct &animData = monster.type().getAnimData(MonsterGraphic::Walk);
+		const int golemWalkFrames = animData.frames;
+		const int golemWalkTicks = static_cast<int>(golemWalkFrames) * animData.rate;
+		const int targetTicksPerTile = static_cast<int>(owner._pWFrames) + 1;
+		if (owner._pWFrames > 0 && golemWalkTicks > targetTicksPerTile && golemWalkFrames > 2) {
+			const int skip = std::clamp(golemWalkFrames - 1 - targetTicksPerTile, 0, golemWalkFrames - 2);
+			monster.animInfo.setNewAnimation(
+			    animData.spritesForDirection(endDir), animData.frames, 1,
+			    AnimationDistributionFlags::ProcessAnimationPending,
+			    static_cast<int8_t>(skip));
+			monster.flags &= ~(MFLAG_LOCK_ANIMATION | MFLAG_ALLOW_SPECIAL);
+			monster.direction = endDir;
+			golemWalkStarted = true;
 		}
+	}
+	if (!golemWalkStarted) {
+		NewMonsterAnim(monster, MonsterGraphic::Walk, endDir, AnimationDistributionFlags::ProcessAnimationPending, -1);
 	}
 }
 
