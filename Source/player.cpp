@@ -2459,6 +2459,11 @@ void AddPlrMonstExper(int lvl, unsigned exp, char pmask)
 	}
 }
 
+void StartGolemCooldown(Player &player)
+{
+	player._pGolemCooldownTicks = RogueGolemCooldownTicks;
+}
+
 void InitPlayer(Player &player, bool firstTime)
 {
 	if (firstTime) {
@@ -2466,12 +2471,21 @@ void InitPlayer(Player &player, bool firstTime)
 		player._pRSpell = SpellID::Invalid;
 		if (&player == MyPlayer)
 			LoadHotkeys();
+		// Rogue Rebalance: restore the innate Golem cooldown from the save
+		if (&player == MyPlayer)
+			LoadRogueGolemState();
 		player._pSBkSpell = SpellID::Invalid;
 		player.queuedSpell.spellId = player._pRSpell;
 		player.queuedSpell.spellType = player._pRSplType;
 		player.pManaShield = false;
 		player.wReflections = 0;
 	}
+
+	// Rogue Rebalance: the Rogue has an innate Golem ability from level 1.
+	// It costs 0 mana, needs no spellbook or Magic attribute, and uses the
+	// existing Golem AI, graphics, and combat mechanics.
+	if (player._pClass == HeroClass::Rogue)
+		player._pAblSpells |= GetSpellBitmask(SpellID::Golem);
 
 	player.lightId = NO_LIGHT;
 
@@ -3005,6 +3019,9 @@ void ProcessPlayers()
 
 	for (size_t pnum = 0; pnum < Players.size(); pnum++) {
 		Player &player = Players[pnum];
+		// Rogue Rebalance: tick down the innate Golem cooldown once per game tick
+		if (player.plractive && player._pGolemCooldownTicks > 0)
+			player._pGolemCooldownTicks--;
 		if (player.plractive && player.isOnActiveLevel() && (&player == MyPlayer || !player._pLvlChanging)) {
 			if (!PlrDeathModeOK(player) && player.hasNoLife()) {
 				SyncPlrKill(player, DeathReason::Unknown);
@@ -3162,6 +3179,13 @@ void CheckPlrSpell(bool isShiftHeld, SpellID spellID, SpellType spellType)
 	}
 
 	if (leveltype == DTYPE_TOWN && !GetSpellData(spellID).isAllowedInTown()) {
+		myPlayer.Say(HeroSpeech::ICantCastThatHere);
+		return;
+	}
+
+	// Rogue Rebalance: the innate Golem cannot be resummoned while the
+	// cooldown from the previous golem's death is still active.
+	if (spellID == SpellID::Golem && myPlayer._pClass == HeroClass::Rogue && myPlayer._pGolemCooldownTicks > 0) {
 		myPlayer.Say(HeroSpeech::ICantCastThatHere);
 		return;
 	}

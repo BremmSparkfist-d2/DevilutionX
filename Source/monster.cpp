@@ -4005,6 +4005,18 @@ void MonsterDeath(Monster &monster, Direction md, bool sendmsg)
 	if (!monster.isPlayerMinion())
 		AddPlrMonstExper(monster.level(sgGameInitInfo.nDifficulty), monster.exp(sgGameInitInfo.nDifficulty), monster.whoHit);
 
+	// Rogue Rebalance: when a Rogue's golem dies, the innate Golem resummon
+	// cooldown starts. This hook is hit for combat deaths and for golems
+	// dismissed by recasting, so the cooldown cannot be bypassed.
+	if (monster.type().type == MT_GOLEM) {
+		const int ownerId = monster.goalVar3;
+		if (ownerId >= 0 && static_cast<size_t>(ownerId) < Players.size()) {
+			Player &owner = Players[ownerId];
+			if (owner._pClass == HeroClass::Rogue)
+				StartGolemCooldown(owner);
+		}
+	}
+
 	MonsterKillCounts[monster.type().type]++;
 	monster.hitPoints = Fixed26_6::fromInt(0);
 	// A monster without life no longer blocks the tile it stands on.
