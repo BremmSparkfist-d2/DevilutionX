@@ -2481,11 +2481,6 @@ void InitPlayer(Player &player, bool firstTime)
 		player.wReflections = 0;
 	}
 
-	// Rogue Rebalance: the Rogue has an innate Golem ability from level 1.
-	// It costs 0 mana, needs no spellbook or Magic attribute, and uses the
-	// existing Golem AI, graphics, and combat mechanics.
-	if (player._pClass == HeroClass::Rogue)
-		player._pAblSpells |= GetSpellBitmask(SpellID::Golem);
 
 	player.lightId = NO_LIGHT;
 
@@ -2525,6 +2520,13 @@ void InitPlayer(Player &player, bool firstTime)
 	}
 
 	player._pAblSpells = GetSpellBitmask(GetPlayerStartingLoadoutForClass(player._pClass).skill);
+
+	// Rogue Rebalance: the Rogue has an innate Golem ability from level 1.
+	// It costs 0 mana, needs no spellbook or Magic attribute, and uses the
+	// existing Golem AI, graphics, and combat mechanics. This must be applied
+	// after the ability bitmask reset above, which would otherwise wipe it.
+	if (player._pClass == HeroClass::Rogue)
+		player._pAblSpells |= GetSpellBitmask(SpellID::Golem);
 
 	player._pInvincible = false;
 
