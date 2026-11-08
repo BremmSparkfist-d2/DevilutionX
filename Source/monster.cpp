@@ -819,11 +819,18 @@ void WalkInDirection(Monster &monster, Direction endDir)
 	monster.var3 = static_cast<int8_t>(endDir);
 	NewMonsterAnim(monster, MonsterGraphic::Walk, endDir, AnimationDistributionFlags::ProcessAnimationPending, -1);
 
-	// Rogue Rebalance: the golem walks noticeably faster than the base
-	// monster walk animation. Halving the ticks per frame makes the walk
-	// animation (and with it the tile-to-tile movement) finish faster.
-	if (monster.type().type == MT_GOLEM && monster.animInfo.ticksPerFrame > 1)
-		monster.animInfo.ticksPerFrame = static_cast<int8_t>(monster.animInfo.ticksPerFrame / 2);
+	// Rogue Rebalance: the golem walks exactly as fast as its owner. The
+	// player's walk animation advances one frame per game tick and covers
+	// one tile in _pWFrames ticks, so scale the golem's walk ticks per
+	// frame so its walk animation spans the same number of ticks.
+	if (monster.type().type == MT_GOLEM && monster.goalVar3 >= 0
+	    && static_cast<size_t>(monster.goalVar3) < Players.size()) {
+		const Player &owner = Players[monster.goalVar3];
+		if (owner._pWFrames > 0 && monster.animInfo.numberOfFrames > 0) {
+			const int ticksPerWalk = std::max(1, static_cast<int>(owner._pWFrames) / monster.animInfo.numberOfFrames);
+			monster.animInfo.ticksPerFrame = static_cast<int8_t>(std::clamp(ticksPerWalk, 1, 127));
+		}
+	}
 }
 
 void StartAttack(Monster &monster)
@@ -4198,7 +4205,18 @@ void GolumAi(Monster &golem)
 		return;
 	}
 
+	// Rogue Rebalance: the golem guards a fixed radius around its owner.
+	// It attacks enemies inside that radius and otherwise keeps up with
+	// the owner instead of wandering off across the level.
+	constexpr int GolemGuardRadius = 6;
+	const Player &owner = Players[golem.goalVar3];
+	const int ownerDistance = golem.position.tile.WalkingDistance(owner.position.tile);
+	bool enemyWithinGuard = false;
 	if ((golem.flags & MFLAG_NO_ENEMY) == 0) {
+		enemyWithinGuard = Monsters[golem.enemy].position.tile.WalkingDistance(owner.position.tile) <= GolemGuardRadius;
+	}
+
+	if (enemyWithinGuard) {
 		Monster &enemy = Monsters[golem.enemy];
 		const int mex = golem.position.tile.x - enemy.position.future.x;
 		const int mey = golem.position.tile.y - enemy.position.future.y;
@@ -4231,14 +4249,19 @@ void GolumAi(Monster &golem)
 	if (golem.pathCount > 8)
 		golem.pathCount = 5;
 
-	if (RandomWalk(golem, Players[golem.goalVar3]._pdir))
-		return;
+	// Rogue Rebalance: follow the owner directly when more than one tile
+	// away; stand down when the golem is next to its owner.
+	if (ownerDistance > 1) {
+		golem.direction = GetDirection(golem.position.tile, owner.position.tile);
+		if (RandomWalk(golem, golem.direction))
+			return;
 
-	Direction md = Left(golem.direction);
-	for (int j = 0; j < 8; j++) {
-		md = Right(md);
-		if (Walk(golem, md)) {
-			break;
+		Direction md = Left(golem.direction);
+		for (int j = 0; j < 8; j++) {
+			md = Right(md);
+			if (Walk(golem, md)) {
+				break;
+			}
 		}
 	}
 }

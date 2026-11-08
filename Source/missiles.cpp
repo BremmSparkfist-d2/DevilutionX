@@ -2491,10 +2491,11 @@ void AddGolem(Missile &missile, AddMissileParameter &parameter)
 
 	Monster *golem = FindGolemForPlayer(player);
 
-	// Rogue Rebalance: casting while the golem is alive does nothing.
-	// The existing golem stays summoned; recasting never unsummons it.
-	if (golem != nullptr)
+	// Is Golem alive?
+	if (golem != nullptr) {
+		KillGolem(*golem);
 		return;
+	}
 
 	std::optional<Point> spawnPosition = FindClosestValidPosition(
 	    [start = missile.position.start](Point target) {
