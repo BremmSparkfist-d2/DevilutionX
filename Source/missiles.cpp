@@ -2491,10 +2491,17 @@ void AddGolem(Missile &missile, AddMissileParameter &parameter)
 
 	Monster *golem = FindGolemForPlayer(player);
 
-	// Is Golem alive?
+	// Rogue Rebalance: for the Rogue, recasting while a golem is alive
+	// replaces it: the old golem is killed and a fresh one is summoned
+	// in the same cast. The resummon cooldown is not applied, because the
+	// player has a living golem again. Other classes keep the vanilla
+	// behaviour (the existing golem is dismissed, a new one can be
+	// summoned with a further cast).
 	if (golem != nullptr) {
 		KillGolem(*golem);
-		return;
+		if (player._pClass != HeroClass::Rogue)
+			return;
+		player._pGolemCooldownTicks = 0;
 	}
 
 	std::optional<Point> spawnPosition = FindClosestValidPosition(

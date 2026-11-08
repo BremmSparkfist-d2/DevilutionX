@@ -3119,11 +3119,16 @@ bool PosOkPlayer(const Player &player, Point position)
 		if (leveltype == DTYPE_TOWN) {
 			return false;
 		}
-		if (dMonster[position.x][position.y] <= 0) {
-			return false;
-		}
-		if (!Monsters[dMonster[position.x][position.y] - 1].hasNoLife()) {
-			return false;
+		const Monster &monsterAtPosition = Monsters[std::abs(dMonster[position.x][position.y]) - 1];
+		// Rogue Rebalance: players can walk through golems (their own and
+		// those of other players).
+		if (monsterAtPosition.type().type != MT_GOLEM) {
+			if (dMonster[position.x][position.y] <= 0) {
+				return false;
+			}
+			if (!monsterAtPosition.hasNoLife()) {
+				return false;
+			}
 		}
 	}
 
