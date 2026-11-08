@@ -2466,6 +2466,10 @@ void StartGolemCooldown(Player &player)
 
 void InitPlayer(Player &player, bool firstTime)
 {
+	// Rogue Rebalance: the innate Golem cooldown resets when entering a
+	// level. InitPlayer runs on every level change and at game start.
+	player._pGolemCooldownTicks = 0;
+
 	if (firstTime) {
 		player._pRSplType = SpellType::Invalid;
 		player._pRSpell = SpellID::Invalid;
