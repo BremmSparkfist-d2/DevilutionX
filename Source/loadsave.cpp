@@ -2378,24 +2378,6 @@ void LoadHotkeys()
 	myPlayer._pRSplType = static_cast<SpellType>(file.NextLE<uint8_t>());
 }
 
-void LoadRogueGolemState()
-{
-	LoadHelper file(OpenSaveArchive(gSaveNumber), "rogue");
-	if (!file.IsValid())
-		return;
-
-	Player &myPlayer = *MyPlayer;
-	// Rogue Rebalance: restore the innate Golem cooldown across save/load
-	myPlayer._pGolemCooldownTicks = std::max<int32_t>(file.NextLE<int32_t>(), 0);
-}
-
-void SaveRogueGolemState(SaveWriter &saveWriter, const Player &player)
-{
-	// Rogue Rebalance: persist the innate Golem cooldown across save/load
-	SaveHelper file(saveWriter, "rogue", sizeof(int32_t));
-	file.WriteLE<int32_t>(player._pGolemCooldownTicks);
-}
-
 void SaveHotkeys(SaveWriter &saveWriter, const Player &player)
 {
 	SaveHelper file(saveWriter, "hotkeys", HotkeysSize());

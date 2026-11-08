@@ -36,8 +36,6 @@ void RemoveEmptyInventory(Player &player);
  * @param firstflag Can be set to false if we are simply reloading the current game
  */
 std::expected<void, std::string> LoadGame(bool firstflag);
-void LoadRogueGolemState();
-void SaveRogueGolemState(SaveWriter &saveWriter, const Player &player);
 void SaveHotkeys(SaveWriter &saveWriter, const Player &player);
 void SaveHeroItems(SaveWriter &saveWriter, Player &player);
 void SaveGameData(SaveWriter &saveWriter);
