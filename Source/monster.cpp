@@ -833,9 +833,7 @@ void WalkInDirection(Monster &monster, Direction endDir)
 		const AnimStruct &animData = monster.type().getAnimData(MonsterGraphic::Walk);
 		const int golemWalkFrames = animData.frames;
 		const int golemWalkTicks = static_cast<int>(golemWalkFrames) * animData.rate;
-		// Rogue Rebalance: the golem moves 1.2x as fast as the owner's
-		// walk (5/6 of the ticks per tile).
-		const int targetTicksPerTile = std::max(1, (static_cast<int>(owner._pWFrames) + 1) * 5 / 6);
+		const int targetTicksPerTile = static_cast<int>(owner._pWFrames) + 1;
 		if (owner._pWFrames > 0 && golemWalkTicks > targetTicksPerTile && golemWalkFrames > 2) {
 			const int skip = std::clamp(golemWalkFrames - 1 - targetTicksPerTile, 0, golemWalkFrames - 2);
 			monster.animInfo.setNewAnimation(
