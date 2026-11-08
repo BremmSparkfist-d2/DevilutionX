@@ -477,16 +477,46 @@ bool CheckCanHitOnlyWalking(const Missile &missile, const ActorPosition &positio
 	return false;
 }
 
+/**
+ * @brief Rogue Rebalance: 20% chance that a Rogue arrow pierces on a successful hit
+ */
+bool EvaluateRogueArrowPierce()
+{
+	return RandomIntLessThan(100) < 20;
+}
+
 void CheckMissileCol(Missile &missile, DamageType damageType, int minDamage, int maxDamage, bool isDamageShifted, Point position, bool dontDeleteOnCollision, std::optional<Direction> onlyHitWalking = {})
 {
 	if (!InDungeonBounds(position))
 		return;
 
 	bool isMonsterHit = false;
+	// Rogue Rebalance: piercing arrows.
+	// var3: pierce state (0 = none, 1 = armed, 2 = pierced, arrow flying on)
+	// var4: monster id of the pierced target
+	const bool isRoguePiercingArrow = missile._mitype == MissileID::Arrow
+	    && missile._micaster == TARGET_MONSTERS
+	    && missile.var3 > 0
+	    && missile.sourceType() == MissileSource::Player
+	    && missile.sourcePlayer()->_pClass == HeroClass::Rogue;
+	int hitMonsterId = -1;
+	int effMinDamage = minDamage;
+	int effMaxDamage = maxDamage;
 	int mid = dMonster[position.x][position.y];
 	if (mid != 0) {
 		Monster &monster = Monsters[std::abs(mid) - 1];
-		if (onlyHitWalking.has_value() ? (monster.isWalking() && CheckCanHitOnlyWalking(missile, monster.position, *onlyHitWalking)) : (mid > 0 || monster.mode == MonsterMode::Petrified)) {
+		hitMonsterId = static_cast<int>(monster.getId());
+		// Rogue Rebalance: a piercing arrow never hits the enemy it already pierced
+		const bool skipPiercedTarget = isRoguePiercingArrow
+		    && missile.var3 == 2
+		    && missile.var4 == hitMonsterId;
+		// Rogue Rebalance: the second enemy receives 50% of the original arrow damage
+		if (isRoguePiercingArrow && missile.var3 == 2) {
+			effMinDamage = std::max(minDamage / 2, 1);
+			effMaxDamage = std::max(maxDamage / 2, 1);
+		}
+		if (!skipPiercedTarget
+		    && (onlyHitWalking.has_value() ? (monster.isWalking() && CheckCanHitOnlyWalking(missile, monster.position, *onlyHitWalking)) : (mid > 0 || monster.mode == MonsterMode::Petrified))) {
 			if (missile.IsTrap()
 			    || (missile._micaster == TARGET_PLAYERS && (                                     // or was fired by a monster and
 			            monster.isPlayerMinion() != Monsters[missile._misource].isPlayerMinion() //  the monsters are on opposing factions
@@ -494,16 +524,35 @@ void CheckMissileCol(Missile &missile, DamageType damageType, int minDamage, int
 			            || (monster.flags & MFLAG_BERSERK) != 0                                  //  or the target is berserked
 			            ))) {
 				// then the missile can potentially hit this target
-				isMonsterHit = MonsterTrapHit(monster, minDamage, maxDamage, missile._midist, missile._mitype, damageType, isDamageShifted);
+				isMonsterHit = MonsterTrapHit(monster, effMinDamage, effMaxDamage, missile._midist, missile._mitype, damageType, isDamageShifted);
 			} else if (IsAnyOf(missile._micaster, TARGET_BOTH, TARGET_MONSTERS)) {
-				isMonsterHit = MonsterMHit(*missile.sourcePlayer(), monster, minDamage, maxDamage, missile._midist, missile._mitype, missile.position.start, damageType, isDamageShifted);
+				isMonsterHit = MonsterMHit(*missile.sourcePlayer(), monster, effMinDamage, effMaxDamage, missile._midist, missile._mitype, missile.position.start, damageType, isDamageShifted);
 			}
 		}
 	}
 
 	if (isMonsterHit) {
-		if (!dontDeleteOnCollision)
+		if (isRoguePiercingArrow) {
+			if (missile.var3 == 1) {
+				// First enemy hit: 20% chance to pierce and continue along the
+				// original trajectory. Piercing never triggers recursively.
+				if (EvaluateRogueArrowPierce()) {
+					missile.var3 = 2;
+					missile.var4 = hitMonsterId;
+				} else {
+					missile.var3 = 0;
+					if (!dontDeleteOnCollision)
+						missile.duration = 0;
+				}
+			} else {
+				// Second enemy hit (50% damage): the arrow ends as normal.
+				missile.var3 = 0;
+				if (!dontDeleteOnCollision)
+					missile.duration = 0;
+			}
+		} else if (!dontDeleteOnCollision) {
 			missile.duration = 0;
+		}
 		missile._miHitFlag = true;
 	}
 
@@ -1801,6 +1850,17 @@ void AddArrow(Missile &missile, AddMissileParameter &parameter)
 	UpdateMissileVelocity(missile, dst, av);
 	missile._miAnimFrame = static_cast<int>(GetDirection16(missile.position.start, dst)) + 1;
 	missile.duration = 256;
+
+	// Rogue Rebalance: arm piercing for Rogue bow attacks.
+	// var3: pierce state (0 = none, 1 = armed, 2 = pierced, arrow flying on)
+	// var4: monster id of the pierced target
+	if (missile._micaster == TARGET_MONSTERS) {
+		const Player &player = Players[missile._misource];
+		if (player._pClass == HeroClass::Rogue) {
+			missile.var3 = 1;
+			missile.var4 = -1;
+		}
+	}
 }
 
 void UpdateVileMissPos(Missile &missile, Point dst)
@@ -2421,12 +2481,27 @@ void AddGolem(Missile &missile, AddMissileParameter &parameter)
 
 	const int playerId = missile._misource;
 	Player &player = Players[playerId];
+
+	// Rogue Rebalance: the innate Golem cannot be resummoned while the
+	// cooldown from the previous golem's death is still active. Checked
+	// for every cast path (innate ability, scroll, staff), so the
+	// cooldown cannot be bypassed.
+	if (player._pClass == HeroClass::Rogue && player._pGolemCooldownTicks > 0)
+		return;
+
 	Monster *golem = FindGolemForPlayer(player);
 
-	// Is Golem alive?
+	// Rogue Rebalance: for the Rogue, recasting while a golem is alive
+	// replaces it: the old golem is killed and a fresh one is summoned
+	// in the same cast. The resummon cooldown is not applied, because the
+	// player has a living golem again. Other classes keep the vanilla
+	// behaviour (the existing golem is dismissed, a new one can be
+	// summoned with a further cast).
 	if (golem != nullptr) {
 		KillGolem(*golem);
-		return;
+		if (player._pClass != HeroClass::Rogue)
+			return;
+		player._pGolemCooldownTicks = 0;
 	}
 
 	std::optional<Point> spawnPosition = FindClosestValidPosition(

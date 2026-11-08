@@ -333,6 +333,8 @@ public:
 	uint64_t _pAblSpells;
 	/** @brief Bitmask of spells available via scrolls */
 	uint64_t _pScrlSpells;
+	/** @brief Rogue Rebalance: remaining game ticks of the innate Golem cooldown (set when the golem dies) */
+	int _pGolemCooldownTicks = 0;
 	SpellFlag _pSpellFlags;
 	SpellID _pSplHotKey[NumHotkeys];
 	SpellType _pSplTHotKey[NumHotkeys];
@@ -644,7 +646,16 @@ public:
 			return 0;
 		}
 
-		return std::max<int>(_pISplLvlAdd + _pSplLvl[static_cast<std::size_t>(spell)], 0);
+		const int learnedLevel = std::max<int>(_pISplLvlAdd + _pSplLvl[static_cast<std::size_t>(spell)], 0);
+
+		// Rogue Rebalance: the Rogue has an innate Golem ability that scales with
+		// character level, independently of any learned Golem spell level.
+		if (spell == SpellID::Golem && _pClass == HeroClass::Rogue) {
+			const int innateLevel = std::min(10, 1 + (getCharacterLevel() - 1) / 5);
+			return std::max(learnedLevel, innateLevel);
+		}
+
+		return learnedLevel;
 	}
 
 	/**
@@ -970,6 +981,17 @@ void StartPlrBlock(Player &player, Direction dir);
 void FixPlrWalkTags(const Player &player);
 void StartPlrHit(Player &player, Fixed26_6 dam, bool forcehit);
 void StartPlayerKill(Player &player, DeathReason deathReason);
+
+/**
+ * @brief Rogue Rebalance: duration in game ticks of the innate Golem cooldown
+ * that starts when the Rogue's golem dies (5 seconds at 20 game ticks per second).
+ */
+constexpr int RogueGolemCooldownTicks = 5 * 20;
+
+/**
+ * @brief Rogue Rebalance: starts the innate Golem cooldown for a Rogue
+ */
+void StartGolemCooldown(Player &player);
 /**
  * @brief Strip the top off gold piles that are larger than MaxGold
  */

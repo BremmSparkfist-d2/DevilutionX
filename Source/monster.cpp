@@ -817,7 +817,39 @@ void WalkInDirection(Monster &monster, Direction endDir)
 	monster.var1 = dir.x;
 	monster.var2 = dir.y;
 	monster.var3 = static_cast<int8_t>(endDir);
-	NewMonsterAnim(monster, MonsterGraphic::Walk, endDir, AnimationDistributionFlags::ProcessAnimationPending, -1);
+
+	// Rogue Rebalance: the golem walks exactly as fast as its owner.
+	// The player's walk animation advances one frame per game tick and
+	// covers one tile in about _pWFrames + 1 ticks. If the golem's walk
+	// animation would take longer than that, compress it to the same
+	// duration: advance one frame per tick and start the walk animation
+	// on a later frame so the tile-to-tile move finishes just as fast as
+	// the owner's. The skipped frames are still shown (compressed) by the
+	// animation distribution logic.
+	bool golemWalkStarted = false;
+	if (monster.type().type == MT_GOLEM && monster.goalVar3 >= 0
+	    && static_cast<size_t>(monster.goalVar3) < Players.size()) {
+		const Player &owner = Players[monster.goalVar3];
+		const AnimStruct &animData = monster.type().getAnimData(MonsterGraphic::Walk);
+		const int golemWalkFrames = animData.frames;
+		const int golemWalkTicks = static_cast<int>(golemWalkFrames) * animData.rate;
+		// Rogue Rebalance: the golem moves 1.2x as fast as the owner's
+		// walk (5/6 of the ticks per tile).
+		const int targetTicksPerTile = std::max(1, (static_cast<int>(owner._pWFrames) + 1) * 5 / 6);
+		if (owner._pWFrames > 0 && golemWalkTicks > targetTicksPerTile && golemWalkFrames > 2) {
+			const int skip = std::clamp(golemWalkFrames - 1 - targetTicksPerTile, 0, golemWalkFrames - 2);
+			monster.animInfo.setNewAnimation(
+			    animData.spritesForDirection(endDir), animData.frames, 1,
+			    AnimationDistributionFlags::ProcessAnimationPending,
+			    static_cast<int8_t>(skip));
+			monster.flags &= ~(MFLAG_LOCK_ANIMATION | MFLAG_ALLOW_SPECIAL);
+			monster.direction = endDir;
+			golemWalkStarted = true;
+		}
+	}
+	if (!golemWalkStarted) {
+		NewMonsterAnim(monster, MonsterGraphic::Walk, endDir, AnimationDistributionFlags::ProcessAnimationPending, -1);
+	}
 }
 
 void StartAttack(Monster &monster)
@@ -4005,6 +4037,18 @@ void MonsterDeath(Monster &monster, Direction md, bool sendmsg)
 	if (!monster.isPlayerMinion())
 		AddPlrMonstExper(monster.level(sgGameInitInfo.nDifficulty), monster.exp(sgGameInitInfo.nDifficulty), monster.whoHit);
 
+	// Rogue Rebalance: when a Rogue's golem dies, the innate Golem resummon
+	// cooldown starts. This hook is hit for combat deaths and for golems
+	// dismissed by recasting, so the cooldown cannot be bypassed.
+	if (monster.type().type == MT_GOLEM) {
+		const int ownerId = monster.goalVar3;
+		if (ownerId >= 0 && static_cast<size_t>(ownerId) < Players.size()) {
+			Player &owner = Players[ownerId];
+			if (owner._pClass == HeroClass::Rogue)
+				StartGolemCooldown(owner);
+		}
+	}
+
 	MonsterKillCounts[monster.type().type]++;
 	monster.hitPoints = Fixed26_6::fromInt(0);
 	// A monster without life no longer blocks the tile it stands on.
@@ -4180,7 +4224,18 @@ void GolumAi(Monster &golem)
 		return;
 	}
 
+	// Rogue Rebalance: the golem guards a fixed radius around its owner.
+	// It attacks enemies inside that radius and otherwise keeps up with
+	// the owner instead of wandering off across the level.
+	constexpr int GolemGuardRadius = 6;
+	const Player &owner = Players[golem.goalVar3];
+	const int ownerDistance = golem.position.tile.WalkingDistance(owner.position.tile);
+	bool enemyWithinGuard = false;
 	if ((golem.flags & MFLAG_NO_ENEMY) == 0) {
+		enemyWithinGuard = Monsters[golem.enemy].position.tile.WalkingDistance(owner.position.tile) <= GolemGuardRadius;
+	}
+
+	if (enemyWithinGuard) {
 		Monster &enemy = Monsters[golem.enemy];
 		const int mex = golem.position.tile.x - enemy.position.future.x;
 		const int mey = golem.position.tile.y - enemy.position.future.y;
@@ -4213,14 +4268,19 @@ void GolumAi(Monster &golem)
 	if (golem.pathCount > 8)
 		golem.pathCount = 5;
 
-	if (RandomWalk(golem, Players[golem.goalVar3]._pdir))
-		return;
+	// Rogue Rebalance: follow the owner directly when more than one tile
+	// away; stand down when the golem is next to its owner.
+	if (ownerDistance > 1) {
+		golem.direction = GetDirection(golem.position.tile, owner.position.tile);
+		if (RandomWalk(golem, golem.direction))
+			return;
 
-	Direction md = Left(golem.direction);
-	for (int j = 0; j < 8; j++) {
-		md = Right(md);
-		if (Walk(golem, md)) {
-			break;
+		Direction md = Left(golem.direction);
+		for (int j = 0; j < 8; j++) {
+			md = Right(md);
+			if (Walk(golem, md)) {
+				break;
+			}
 		}
 	}
 }

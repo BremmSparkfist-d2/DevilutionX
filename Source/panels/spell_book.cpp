@@ -168,7 +168,14 @@ void DrawSpellBook(const Surface &out)
 			PrintSBookStr(out, line0, pgettext("spell", GetSpellData(sn).sNameText));
 			switch (GetSBookTrans(sn, false)) {
 			case SpellType::Skill:
-				PrintSBookStr(out, line1, _("Skill"));
+				if (sn == SpellID::Golem && player._pClass == HeroClass::Rogue) {
+					// Rogue Rebalance: show the effective innate Golem spell level and 0 mana cost
+					const int lvl = player.GetSpellLevel(sn);
+					PrintSBookStr(out, line0, FormatRuntime(pgettext(/* TRANSLATORS: UI constraints, keep short please.*/ "spellbook", "Level {:d}"), lvl), UiFlags::AlignRight);
+					PrintSBookStr(out, line1, FormatRuntime(pgettext(/* TRANSLATORS: UI constraints, keep short please.*/ "spellbook", "Mana: {:d}"), 0));
+				} else {
+					PrintSBookStr(out, line1, _("Skill"));
+				}
 				break;
 			case SpellType::Charges: {
 				const int charges = player.InvBody[INVLOC_HAND_LEFT]._iCharges;

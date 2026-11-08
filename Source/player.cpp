@@ -2459,8 +2459,17 @@ void AddPlrMonstExper(int lvl, unsigned exp, char pmask)
 	}
 }
 
+void StartGolemCooldown(Player &player)
+{
+	player._pGolemCooldownTicks = RogueGolemCooldownTicks;
+}
+
 void InitPlayer(Player &player, bool firstTime)
 {
+	// Rogue Rebalance: the innate Golem cooldown resets when entering a
+	// level. InitPlayer runs on every level change and at game start.
+	player._pGolemCooldownTicks = 0;
+
 	if (firstTime) {
 		player._pRSplType = SpellType::Invalid;
 		player._pRSpell = SpellID::Invalid;
@@ -2472,6 +2481,7 @@ void InitPlayer(Player &player, bool firstTime)
 		player.pManaShield = false;
 		player.wReflections = 0;
 	}
+
 
 	player.lightId = NO_LIGHT;
 
@@ -2511,6 +2521,13 @@ void InitPlayer(Player &player, bool firstTime)
 	}
 
 	player._pAblSpells = GetSpellBitmask(GetPlayerStartingLoadoutForClass(player._pClass).skill);
+
+	// Rogue Rebalance: the Rogue has an innate Golem ability from level 1.
+	// It costs 0 mana, needs no spellbook or Magic attribute, and uses the
+	// existing Golem AI, graphics, and combat mechanics. This must be applied
+	// after the ability bitmask reset above, which would otherwise wipe it.
+	if (player._pClass == HeroClass::Rogue)
+		player._pAblSpells |= GetSpellBitmask(SpellID::Golem);
 
 	player._pInvincible = false;
 
@@ -3005,6 +3022,9 @@ void ProcessPlayers()
 
 	for (size_t pnum = 0; pnum < Players.size(); pnum++) {
 		Player &player = Players[pnum];
+		// Rogue Rebalance: tick down the innate Golem cooldown once per game tick
+		if (player.plractive && player._pGolemCooldownTicks > 0)
+			player._pGolemCooldownTicks--;
 		if (player.plractive && player.isOnActiveLevel() && (&player == MyPlayer || !player._pLvlChanging)) {
 			if (!PlrDeathModeOK(player) && player.hasNoLife()) {
 				SyncPlrKill(player, DeathReason::Unknown);
@@ -3100,11 +3120,16 @@ bool PosOkPlayer(const Player &player, Point position)
 		if (leveltype == DTYPE_TOWN) {
 			return false;
 		}
-		if (dMonster[position.x][position.y] <= 0) {
-			return false;
-		}
-		if (!Monsters[dMonster[position.x][position.y] - 1].hasNoLife()) {
-			return false;
+		const Monster &monsterAtPosition = Monsters[std::abs(dMonster[position.x][position.y]) - 1];
+		// Rogue Rebalance: players can walk through golems (their own and
+		// those of other players).
+		if (monsterAtPosition.type().type != MT_GOLEM) {
+			if (dMonster[position.x][position.y] <= 0) {
+				return false;
+			}
+			if (!monsterAtPosition.hasNoLife()) {
+				return false;
+			}
 		}
 	}
 
@@ -3162,6 +3187,13 @@ void CheckPlrSpell(bool isShiftHeld, SpellID spellID, SpellType spellType)
 	}
 
 	if (leveltype == DTYPE_TOWN && !GetSpellData(spellID).isAllowedInTown()) {
+		myPlayer.Say(HeroSpeech::ICantCastThatHere);
+		return;
+	}
+
+	// Rogue Rebalance: the innate Golem cannot be resummoned while the
+	// cooldown from the previous golem's death is still active.
+	if (spellID == SpellID::Golem && myPlayer._pClass == HeroClass::Rogue && myPlayer._pGolemCooldownTicks > 0) {
 		myPlayer.Say(HeroSpeech::ICantCastThatHere);
 		return;
 	}
